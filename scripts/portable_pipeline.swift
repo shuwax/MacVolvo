@@ -100,7 +100,7 @@ func inventory(_ directory: URL) throws -> [String: String] {
 // macOS reassigns that ID at each restart, so each restart began a new, empty
 // folder. Before each session, earlier folders are folded into the one the
 // game will open now, and removed.
-let namespaceBuild = "ow2-source-v1"
+let namespaceBuild = "cs2-v1"
 let mergeLimit = 256 * 1048576 // Leaves the game's 512 MB budget room for archives and new learning.
 func validKey(_ key: String) -> Bool { key.count == 64 && key.allSatisfy { "0123456789abcdef".contains($0) } }
 func identity(_ device: MTLDevice) -> (UInt64) -> [UInt8] {

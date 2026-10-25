@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,79 @@ RESOURCES=('Wordmark.png','WordmarkDark.png')
 MINGW_CLANG=ROOT/'runtime/toolchains/llvm-mingw-20261006-ucrt-macos-universal/bin/x86_64-w64-mingw32-clang'
 def run(*args):subprocess.run([str(a) for a in args],check=True)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+
+# Files to extract from the DXMT patch (all are new-file additions, so the full
+# content is present as '+' lines between their hunk header and the next diff).
+_PIPELINE_PATCH_FILES = {
+    'src/winemetal/unix/pipeline_cache.c',
+    'src/winemetal/unix/pipeline_cache.h',
+    'src/winemetal/unix/pipeline_recipe.c',
+    'src/winemetal/unix/pipeline_recipe.h',
+}
+
+def _extract_pipeline_sources(workspace: Path) -> Path:
+    """Parse dxmt-v1-private.patch and write the four pipeline source files."""
+    source_dir = workspace / 'pipeline-source'
+    source_dir.mkdir(parents=True, exist_ok=True)
+    patch_text = (ROOT / 'patches/dxmt-v1-private.patch').read_text(encoding='utf-8', errors='replace')
+    collected: dict[str, list[str]] = {}
+    current: str | None = None
+    in_hunk = False
+    for line in patch_text.splitlines():
+        if line.startswith('diff --git '):
+            current = None; in_hunk = False
+        elif line.startswith('+++ b/'):
+            path = line[6:]
+            current = path if path in _PIPELINE_PATCH_FILES else None
+            if current: collected[current] = []; in_hunk = False
+        elif line.startswith('@@ ') and current:
+            in_hunk = True
+        elif in_hunk and current:
+            if line.startswith('+') and not line.startswith('+++'):
+                collected[current].append(line[1:])
+    for path in _PIPELINE_PATCH_FILES:
+        if path not in collected:
+            raise ValueError(f'Could not extract {path} from patch')
+        (source_dir / Path(path).name).write_text('\n'.join(collected[path]) + '\n')
+    return source_dir
+
+def build_pipeline_helpers(helpers: Path, workspace: Path) -> None:
+    """Build pipeline-prepare (x86_64) and pipeline-setup (arm64) into helpers."""
+    source_dir = _extract_pipeline_sources(workspace)
+    build_dir = workspace / 'pipeline-prepare-build'
+    build_dir.mkdir(parents=True, exist_ok=True)
+    # winemetal.h stub: WMTRenderPipelineInfo is defined in the unpatched winemetal.h
+    # which is not in this repo. dxmt_recipe_capture is never called in offline-tool
+    # mode so field types and layout only need to satisfy the compiler, not match ABI.
+    (build_dir / 'winemetal.h').write_text(
+        '#pragma once\n#define WINEMETAL_API\n'
+        'struct _bal_t { void *ptr; };\n'
+        'struct WMTRenderPipelineInfo {\n'
+        '    void *vertex_function; void *fragment_function;\n'
+        '    unsigned int logic_operation_enabled; unsigned int logic_operation;\n'
+        '    void *binary_archive_for_serialization;\n'
+        '    struct _bal_t binary_archives_for_lookup;\n'
+        '    unsigned int num_binary_archives_for_lookup;\n'
+        '    unsigned int fail_on_binary_archive_miss;\n'
+        '};\n'
+    )
+    library = build_dir / 'libpipeline_prepare.dylib'
+    # Compile the DXMT pipeline cache as a standalone dylib (x86_64, offline-tool mode).
+    run('/usr/bin/clang', '-arch', 'x86_64', '-x', 'objective-c', '-fblocks', '-fno-objc-arc',
+        '-DDXMT_PIPELINE_CACHE_OFFLINE_TOOL', '-O2', '-I', build_dir, '-dynamiclib',
+        source_dir / 'pipeline_recipe.c', source_dir / 'pipeline_cache.c',
+        '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore',
+        '-install_name', '@loader_path/libpipeline_prepare.dylib', '-o', library)
+    run('/usr/bin/clang', '-arch', 'x86_64', '-x', 'objective-c', '-fblocks', '-fobjc-arc',
+        '-DDXMT_PIPELINE_CACHE_OFFLINE_TOOL', '-O2', '-I', source_dir,
+        '-c', ROOT / 'scripts/pipeline_prepare.m', '-o', build_dir / 'main.o')
+    run('/usr/bin/clang', '-arch', 'x86_64', build_dir / 'main.o', library,
+        '-framework', 'Foundation', '-framework', 'Metal', '-o', helpers / 'pipeline-prepare')
+    shutil.copy2(library, helpers / 'libpipeline_prepare.dylib')
+    # Compile the Swift orchestrator (arm64 native; calls pipeline-prepare as subprocess).
+    run('/usr/bin/swiftc', '-O', '-target', 'arm64-apple-macos' + MINIMUM_MACOS,
+        ROOT / 'scripts/portable_pipeline.swift', '-o', helpers / 'pipeline-setup')
+
 def build(output,workspace,runtime_archive,icon=None,identity=None,variant='dxmt'):
     if variant not in ('dxmt','gptk4'):raise ValueError('Unknown app variant')
     evaluation=variant=='gptk4'
@@ -56,6 +130,7 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,variant='dxmt
     for directory in (helpers,resources,macos):directory.mkdir(parents=True)
     build_setup(helpers/'ow2-setup',ROOT/'runtime/toolchains/libarchive-3.7.7',defines=('MACVOLVO_GPTK4',) if evaluation else ())
     shutil.move(helpers/'ow2-setup.build.json',output.parent/'worker-build.json')
+    if not evaluation:build_pipeline_helpers(helpers,workspace)
     run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,'-parse-as-library',*(['-D','MACVOLVO_GPTK4'] if evaluation else []),*sorted((ROOT/'app/Sources').glob('*.swift')),'-o',macos/app_name)
     # Steam's window on Wine 11 (portable_steam.h): the worker puts this in steamwebhelper.exe's place.
     run(MINGW_CLANG,'-O2','-municode','-mwindows','-ffile-prefix-map='+str(ROOT)+'=/ow2-source',ROOT/'scripts/webhelper_wrapper.c','-o',resources/'steamwebhelper.exe')
@@ -86,7 +161,8 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,variant='dxmt
     (output/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':bundle_id,'CFBundleExecutable':app_name,'CFBundleName':app_name,'CFBundleDisplayName':app_name,'CFBundlePackageType':'APPL','CFBundleShortVersionString':release['appVersion'],'CFBundleVersion':APP_BUILD,'CFBundleIconFile':'AppIcon','LSMinimumSystemVersion':MINIMUM_MACOS,'NSHighResolutionCapable':True,'LSMultipleInstancesProhibited':True,'NSPrincipalClass':'NSApplication','NSMicrophoneUsageDescription':MICROPHONE_USAGE,'NSHumanReadableCopyright':'Independent community project based on Recall. Not affiliated with or endorsed by Valve, Volvo or Apple.'}))
     if identity:
         timestamp=['--timestamp'] if identity!='-' else []
-        for binary in (helpers/'ow2-setup',rosetta.parent):
+        pipeline_binaries=[helpers/'libpipeline_prepare.dylib',helpers/'pipeline-prepare',helpers/'pipeline-setup'] if not evaluation else []
+        for binary in ([helpers/'ow2-setup']+[b for b in pipeline_binaries if b.exists()]+[rosetta.parent]):
             run('/usr/bin/codesign','--force','--options','runtime',*timestamp,'--sign',identity,binary)
         with tempfile.TemporaryDirectory() as folder:
             entitlements=Path(folder)/'app.entitlements';entitlements.write_bytes(plistlib.dumps(ENTITLEMENTS))

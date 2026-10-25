@@ -5,7 +5,7 @@ import Observation
 @MainActor @Observable
 final class AppModel {
     enum Screen: String, CaseIterable { case welcome, moveApp, checking, readyToInstall, preparing, launching, installer, ready, running, driveMissing, failure }
-    enum Sheet: String, Identifiable { case settings, help, about, uninstall, update, whatsNew; var id: String { rawValue } }
+    enum Sheet: String, Identifiable { case settings, help, about, uninstall, update, whatsNew, demoTraining; var id: String { rawValue } }
     enum UninstallState: Equatable { case idle, working, done(appRemoved: Bool), failed(String) }
     enum UpdateState: Equatable { case idle, checking, upToDate, available(AvailableUpdate), downloading(Double), installing, failed(String) }
     var uninstall: UninstallState = .idle
@@ -91,6 +91,9 @@ final class AppModel {
     var freeBytes: UInt64=0
     var gameInstalled=false
     var clientInstalled=false
+    /// Number of pipeline recipe JSON files in the cache — refreshed every 30 s.
+    var recipeCount: Int = 0
+    @ObservationIgnored private var recipeCountTimer: Timer?
     var downloadedBytes: UInt64=0
     var lastEvents=[String]()
     /// "Preparing graphics" for the launching screen's details; starts over with each launch.
@@ -232,6 +235,11 @@ final class AppModel {
     }
     func startup() {
         guard !started else { return };started=true
+        recipeCount = countRecipes(root: root)
+        recipeCountTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.recipeCount = countRecipes(root: self.root) }
+        }
         // Preview states exercise UI only and never create a user environment.
         if release?.distribution == "private-preview",let i=CommandLine.arguments.firstIndex(of:"--preview-state"),CommandLine.arguments.indices.contains(i+1),let preview=Screen(rawValue:CommandLine.arguments[i+1]) {
             isPreview=true;previewScreen(preview);return

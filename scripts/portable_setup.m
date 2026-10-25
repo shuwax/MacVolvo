@@ -178,7 +178,7 @@ static NSMutableDictionary *wineEnv(NSString *engine) {
         @"DXMT_PIPELINE_CACHE_PATH":join(root,@"cache/pipelines")}];
     // The contract names Overwatch; MacVolvo's games take its place (portable_steam.h).
     [env addEntriesFromDictionary:@{@"WINEMAC_MOUSELOOK":gameList(@";"),@"WINE_GAME_MODE":gameList(@","),
-        @"DXMT_PIPELINE_CACHE_NAMESPACE":@"macvolvo-v1",
+        @"DXMT_PIPELINE_CACHE_NAMESPACE":@"cs2-v1",
         // Chrome flags for Steam's browser (portable_steam.h); the worker's own environment
         // can set others, for testing.
         @"WEBHELPER_EXTRA_ARGS":NSProcessInfo.processInfo.environment[@"WEBHELPER_EXTRA_ARGS"] ?: @"--use-angle=vulkan"}];
@@ -589,6 +589,33 @@ static void launchClient(BOOL diagnostic, NSString *play, NSString *fullscreen, 
     NSMutableDictionary *session=state();
     if(displays)session[@"session_displays"]=displays;
     session[@"session_hud"]=@(hud);session[@"session_game_mode"]=@(gameMode);writeJSON(session,join(root,@"state.json"));
+    // Pipeline preparation for CS2: consolidate earlier caches and compile Metal archives
+    // offline before Steam starts. Best-effort: launch continues if the helper is absent
+    // or times out. pipeline-setup sits next to this worker in Contents/Helpers/.
+    if(game && [game->key isEqual:@"cs2"] && !diagnostic) {
+        NSString *pipelineSetup=[[NSProcessInfo.processInfo.arguments[0] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"pipeline-setup"];
+        if([fm fileExistsAtPath:pipelineSetup]) {
+            saveStage(@"preparing_pipelines");
+            NSTask *prep=[NSTask new];
+            prep.executableURL=[NSURL fileURLWithPath:pipelineSetup];
+            prep.arguments=@[root];
+            prep.environment=@{@"PATH":@"/usr/bin:/bin",@"HOME":root};
+            [fm createDirectoryAtPath:join(root,@"logs") withIntermediateDirectories:YES attributes:nil error:nil];
+            NSString *logPath=join(root,@"logs/pipeline-setup.log");
+            [fm createFileAtPath:logPath contents:nil attributes:nil];
+            NSFileHandle *logHandle=[NSFileHandle fileHandleForWritingAtPath:logPath];
+            if(logHandle){prep.standardOutput=logHandle;prep.standardError=logHandle;}
+            @try{[prep launch];}@catch(NSException *ignored){prep=nil;}
+            if(prep){
+                double end=CFAbsoluteTimeGetCurrent()+120;
+                while(prep.isRunning && CFAbsoluteTimeGetCurrent()<end)
+                    [NSThread sleepForTimeInterval:0.25];
+                if(prep.isRunning)[prep terminate];
+                [logHandle closeFile];
+                event(@"pipeline_preparation_complete",@{@"code":@(prep.terminationStatus)});
+            }
+        }
+    }
     NSDictionary *env=clientEnvironment(diagnostic?diagnosticEnvironment(engine):wineEnv(engine),hud,gameMode);
     NSTask *p=task(join(engine,@"bin/wine"),client,env,[NSString stringWithFormat:@"steam-%@.log",NSUUID.UUID.UUIDString]);
     saveStage(@"battlenet_started");event(@"battlenet_open",@{@"pid":@(p.processIdentifier)});
