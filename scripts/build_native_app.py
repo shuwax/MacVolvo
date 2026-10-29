@@ -75,7 +75,7 @@ def build_pipeline_helpers(helpers: Path, workspace: Path) -> None:
     # winemetal.h stub: WMTRenderPipelineInfo is defined in the unpatched winemetal.h
     # which is not in this repo. dxmt_recipe_capture is never called in offline-tool
     # mode so field types and layout only need to satisfy the compiler, not match ABI.
-    (build_dir / 'winemetal.h').write_text(
+    winemetal_stub = (
         '#pragma once\n#define WINEMETAL_API\n'
         'struct _bal_t { void *ptr; };\n'
         'struct WMTRenderPipelineInfo {\n'
@@ -87,6 +87,9 @@ def build_pipeline_helpers(helpers: Path, workspace: Path) -> None:
         '    unsigned int fail_on_binary_archive_miss;\n'
         '};\n'
     )
+    # pipeline_recipe.c includes "../winemetal.h" (one level above source_dir).
+    (build_dir / 'winemetal.h').write_text(winemetal_stub)
+    (source_dir.parent / 'winemetal.h').write_text(winemetal_stub)
     library = build_dir / 'libpipeline_prepare.dylib'
     # Compile the DXMT pipeline cache as a standalone dylib (x86_64, offline-tool mode).
     run('/usr/bin/clang', '-arch', 'x86_64', '-x', 'objective-c', '-fblocks', '-fno-objc-arc',
