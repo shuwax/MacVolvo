@@ -589,6 +589,9 @@ static void launchClient(BOOL diagnostic, NSString *play, NSString *fullscreen, 
     NSMutableDictionary *session=state();
     if(displays)session[@"session_displays"]=displays;
     session[@"session_hud"]=@(hud);session[@"session_game_mode"]=@(gameMode);writeJSON(session,join(root,@"state.json"));
+    // Pipeline preparation for CS2: consolidate earlier caches and compile Metal archives
+    // offline before Steam starts. Best-effort: launch continues if the helper is absent
+    // or times out. pipeline-setup sits next to this worker in Contents/Helpers/.
     if(game && [game->key isEqual:@"cs2"] && !diagnostic) {
         // Download and extract the community seed cache once (first CS2 launch).
         // The seed folder at cache/pipelines/seed/ is read by pipeline-setup every
@@ -614,12 +617,21 @@ static void launchClient(BOOL diagnostic, NSString *play, NSString *fullscreen, 
             NSTask *prep=[NSTask new];
             prep.executableURL=[NSURL fileURLWithPath:pipelineSetup];
             prep.arguments=@[root];
-            NSPipe *pipe=[NSPipe pipe];prep.standardOutput=pipe;prep.standardError=pipe;
-            [prep launch];
-            NSString *logPath=join(root,@"pipeline-setup.log");
-            [[pipe.fileHandleForReading readDataToEndOfFile] writeToFile:logPath atomically:YES];
-            [prep waitUntilExit];
-            event(@"pipeline_preparation_complete",@{@"code":@(prep.terminationStatus)});
+            prep.environment=@{@"PATH":@"/usr/bin:/bin",@"HOME":root};
+            [fm createDirectoryAtPath:join(root,@"logs") withIntermediateDirectories:YES attributes:nil error:nil];
+            NSString *logPath=join(root,@"logs/pipeline-setup.log");
+            [fm createFileAtPath:logPath contents:nil attributes:nil];
+            NSFileHandle *logHandle=[NSFileHandle fileHandleForWritingAtPath:logPath];
+            if(logHandle){prep.standardOutput=logHandle;prep.standardError=logHandle;}
+            @try{[prep launch];}@catch(NSException *ignored){prep=nil;}
+            if(prep){
+                double end=CFAbsoluteTimeGetCurrent()+120;
+                while(prep.isRunning && CFAbsoluteTimeGetCurrent()<end)
+                    [NSThread sleepForTimeInterval:0.25];
+                if(prep.isRunning)[prep terminate];
+                [logHandle closeFile];
+                event(@"pipeline_preparation_complete",@{@"code":@(prep.terminationStatus)});
+            }
         }
     }
     NSDictionary *env=clientEnvironment(diagnostic?diagnosticEnvironment(engine):wineEnv(engine),hud,gameMode);

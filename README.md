@@ -65,6 +65,50 @@ games unmodified through Wine, the way Linux players have used Proton for years,
 doesn't support playing them on macOS this way and we can't promise VAC won't object. Play on
 an account you're prepared to take that risk with.
 
+## Shader pre-compilation (this fork)
+
+CS2 compiles Metal pipeline archives on the fly during your first matches, causing
+visible stutter whenever it encounters a new shader combination. This fork addresses
+that with an offline pre-compilation pipeline.
+
+### What was fixed
+
+**Namespace mismatch** — the original `portable_pipeline.swift` compiled archives
+into a folder hashed as `ow2-source-v1`, but CS2 stored its recipes under `macvolvo-v1`.
+Both are now aligned to `cs2-v1`, so offline-compiled archives are actually found by CS2.
+
+**Pipeline preparation on launch** — `ow2-setup` now runs `pipeline-setup` before
+Steam starts. It consolidates recipe folders (GPU registry IDs change on every macOS
+restart, creating new subfolders), then compiles all known recipes into Metal binary
+archives. CS2 loads those archives at startup instead of compiling shaders mid-game.
+
+### How to build your shader cache
+
+The more map positions CS2 has seen, the more recipes it has, the smoother it runs.
+Demos let you cover entire maps in minutes by replaying at high speed.
+
+1. Download GOTV demos from [HLTV](https://www.hltv.org) — one pro match per map you play.
+   GOTV demos cover the whole map as the director switches between players.
+2. In MacVolvo, click **Shaders** in the footer.
+3. Choose the folder with your `.dem` files and click **Run**.
+   CS2 opens and closes automatically for each demo at the selected speed (16× recommended).
+4. When it finishes, the recipe count updates in the launcher. Next time you launch CS2,
+   `pipeline-setup` compiles all collected recipes into Metal archives before the game starts.
+
+Alternatively, use the CLI script:
+
+```bash
+scripts/cs2_demo_batch.sh ~/Downloads/demos 16
+```
+
+### What to expect
+
+- First CS2 launch after building the cache: `pipeline-setup` runs for up to 2 minutes
+  compiling archives. Subsequent launches are instant (archives are cached).
+- Maps covered by your demos will be noticeably smoother from the first match.
+- New maps or CS2 updates that add shaders build their recipes naturally during play
+  and are compiled offline on the next launch.
+
 ## Known issues
 
 - **Black screen with sound on launch:** quit the game completely and restart it.

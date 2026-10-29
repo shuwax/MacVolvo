@@ -76,7 +76,7 @@ final class DemoTrainingModel {
                 let before = countRecipes(root: root)
                 appendLog("  Launching CS2...")
                 Task.detached { [helper, root] in
-                    runProcess(helper.path, ["launch", "--game", "cs2", "--root", root.path, "--metal-hud", "1"])
+                    runProcess(helper.path, ["launch", "--game", "cs2", "--root", root.path])
                 }
 
                 var started = false
@@ -117,16 +117,14 @@ final class DemoTrainingModel {
     }
 
     private func closeCS2(helper: URL, root: URL) async {
-        // Kill only CS2, keep Steam running so the next demo can launch immediately.
         await Task.detached {
-            runProcess("/usr/bin/pkill", ["-TERM", "-f", "cs2.exe"])
+            runProcess(helper.path, ["close-client", "--root", root.path])
+            runProcess("/usr/bin/pkill", ["-f", "cs2.exe"])
         }.value
         for _ in 0..<15 {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             if !(await cs2Running()) { break }
         }
-        // Force-kill if still running
-        await Task.detached { runProcess("/usr/bin/pkill", ["-KILL", "-f", "cs2.exe"]) }.value
     }
 }
 
