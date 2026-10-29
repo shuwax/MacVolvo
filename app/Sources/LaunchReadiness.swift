@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AppKit
 
 // Window existence is a handoff signal, not proof that Steam has finished
 // loading its web content. Only geometry and exact owned-process IDs are used.
@@ -24,6 +25,20 @@ enum LaunchReadiness {
         }
         return nil
     }
+    // Fallback when CGWindowList returns no results (Screen Recording unavailable or
+    // D3DMetal windows on non-standard layers). NSRunningApplication requires no permissions.
+    static func launchedProcess(_ processes: [[String:Any]]) -> Int32? {
+        for kind in ["game", "client"] {
+            for process in processes where process["kind"] as? String == kind {
+                guard let pid=process["pid"] as? NSNumber,
+                      let app=NSRunningApplication(processIdentifier: pid.int32Value),
+                      app.activationPolicy == .regular,
+                      app.isFinishedLaunching else { continue }
+                return pid.int32Value
+            }
+        }
+        return nil
+    }
     static func visibleWindows() async -> [[String:Any]] {
         await Task.detached(priority:.utility) {
             CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
@@ -33,6 +48,7 @@ enum LaunchReadiness {
         launchEvents: [[String:Any]] = [],
         timeout: Duration = .seconds(90), interval: Duration = .seconds(1),
         stopped: () -> Bool,
+        confirmed: () -> Bool = { false },
         session: () async throws -> [[String:Any]],
         windows: () async -> [[String:Any]] = visibleWindows
     ) async throws -> Result {
@@ -57,10 +73,14 @@ enum LaunchReadiness {
             let processes=launchingGame ? sessionProcesses.filter {$0["kind"] as? String == "game"} : sessionProcesses
             let visible=await windows()
             if stopped() || Task.isCancelled { return .stopped }
-            let pid=visibleProcess(visible,processes:processes)
+            let pid=visibleProcess(visible,processes:processes) ?? launchedProcess(processes)
             // Two consecutive observations avoid dismissing for a transient
             // startup surface. There is no arbitrary ten-second splash delay.
             if let pid, pid == previous { return .ready(pid) }
+            // Manual confirmation: user asserts Steam window is visible.
+            if confirmed(), let pid=pid ?? processes.first.flatMap({ $0["pid"] as? NSNumber }).map({ $0.int32Value }) {
+                return .ready(pid)
+            }
             previous=pid
             try await Task.sleep(for:interval)
         }

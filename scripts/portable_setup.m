@@ -178,7 +178,7 @@ static NSMutableDictionary *wineEnv(NSString *engine) {
         @"DXMT_PIPELINE_CACHE_PATH":join(root,@"cache/pipelines")}];
     // The contract names Overwatch; MacVolvo's games take its place (portable_steam.h).
     [env addEntriesFromDictionary:@{@"WINEMAC_MOUSELOOK":gameList(@";"),@"WINE_GAME_MODE":gameList(@","),
-        @"DXMT_PIPELINE_CACHE_NAMESPACE":@"macvolvo-v1",
+        @"DXMT_PIPELINE_CACHE_NAMESPACE":@"cs2-v1",
         // Chrome flags for Steam's browser (portable_steam.h); the worker's own environment
         // can set others, for testing.
         @"WEBHELPER_EXTRA_ARGS":NSProcessInfo.processInfo.environment[@"WEBHELPER_EXTRA_ARGS"] ?: @"--use-angle=vulkan"}];
@@ -186,7 +186,7 @@ static NSMutableDictionary *wineEnv(NSString *engine) {
     for(NSString *key in env.allKeys)if([key hasPrefix:@"DXMT_"])[env removeObjectForKey:key];
     [env addEntriesFromDictionary:@{@"CX_ACTIVE_GRAPHICS_BACKEND":@"d3dmetal",@"CX_GRAPHICS_BACKEND":@"d3dmetal",
         @"WINEDLLOVERRIDES":@"d3d11,dxgi,d3d10=b;d3d10core,winemetal,d3d12,d3d12core,nvapi64,nvngx=",
-        @"D3DMETAL_FRAMEWORK_PATH":join(engine,@"lib/external/D3DMetal.framework/D3DMetal"),@"D3DM_ENABLE_METALFX":@"0",
+        @"D3DMETAL_FRAMEWORK_PATH":join(engine,@"lib/external/D3DMetal.framework/D3DMetal"),@"D3DM_ENABLE_METALFX":@"1",
         @"MACVOLVO_GPTK4_DISPLAY_FIX":@"1"}];
 #endif
     return env;
@@ -589,6 +589,39 @@ static void launchClient(BOOL diagnostic, NSString *play, NSString *fullscreen, 
     NSMutableDictionary *session=state();
     if(displays)session[@"session_displays"]=displays;
     session[@"session_hud"]=@(hud);session[@"session_game_mode"]=@(gameMode);writeJSON(session,join(root,@"state.json"));
+    if(game && [game->key isEqual:@"cs2"] && !diagnostic) {
+        // Download and extract the community seed cache once (first CS2 launch).
+        // The seed folder at cache/pipelines/seed/ is read by pipeline-setup every
+        // session; once present it is never re-downloaded.
+        NSString *seedDir=join(join(root,@"cache/pipelines"),@"seed");
+        if(![fm fileExistsAtPath:join(seedDir,@"recipes")]) {
+            event(@"downloading_seed_cache",nil);
+            @try {
+                [fm createDirectoryAtPath:join(root,@"cache/pipelines") withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *seedArchive=download(
+                    @"https://github.com/shuwax/MacVolvo/releases/download/seed-cache-v1/seed-cache.tar.gz",
+                    @"729d41abd91a166320667df95923e5201910276e4d90964da20317193cd6b159");
+                extract(seedArchive,join(root,@"cache/pipelines"));
+                event(@"seed_cache_ready",nil);
+            } @catch(NSException *e) {
+                // Non-fatal: the game still launches, just without the seed boost.
+                event(@"seed_cache_skipped",@{@"reason":e.reason ?: @"unknown"});
+            }
+        }
+        NSString *pipelineSetup=[[NSProcessInfo.processInfo.arguments[0] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"pipeline-setup"];
+        if([fm fileExistsAtPath:pipelineSetup]) {
+            saveStage(@"preparing_pipelines");
+            NSTask *prep=[NSTask new];
+            prep.executableURL=[NSURL fileURLWithPath:pipelineSetup];
+            prep.arguments=@[root];
+            NSPipe *pipe=[NSPipe pipe];prep.standardOutput=pipe;prep.standardError=pipe;
+            [prep launch];
+            NSString *logPath=join(root,@"pipeline-setup.log");
+            [[pipe.fileHandleForReading readDataToEndOfFile] writeToFile:logPath atomically:YES];
+            [prep waitUntilExit];
+            event(@"pipeline_preparation_complete",@{@"code":@(prep.terminationStatus)});
+        }
+    }
     NSDictionary *env=clientEnvironment(diagnostic?diagnosticEnvironment(engine):wineEnv(engine),hud,gameMode);
     NSTask *p=task(join(engine,@"bin/wine"),client,env,[NSString stringWithFormat:@"steam-%@.log",NSUUID.UUID.UUIDString]);
     saveStage(@"battlenet_started");event(@"battlenet_open",@{@"pid":@(p.processIdentifier)});

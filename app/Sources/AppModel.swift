@@ -5,7 +5,7 @@ import Observation
 @MainActor @Observable
 final class AppModel {
     enum Screen: String, CaseIterable { case welcome, moveApp, checking, readyToInstall, preparing, launching, installer, ready, running, driveMissing, failure }
-    enum Sheet: String, Identifiable { case settings, help, about, uninstall, update, whatsNew; var id: String { rawValue } }
+    enum Sheet: String, Identifiable { case settings, help, about, uninstall, update, whatsNew, demoTraining; var id: String { rawValue } }
     enum UninstallState: Equatable { case idle, working, done(appRemoved: Bool), failed(String) }
     enum UpdateState: Equatable { case idle, checking, upToDate, available(AvailableUpdate), downloading(Double), installing, failed(String) }
     var uninstall: UninstallState = .idle
@@ -91,6 +91,9 @@ final class AppModel {
     var freeBytes: UInt64=0
     var gameInstalled=false
     var clientInstalled=false
+    /// Number of pipeline recipe JSON files in the cache — refreshed every 30 s.
+    var recipeCount: Int = 0
+    @ObservationIgnored private var recipeCountTimer: Timer?
     var downloadedBytes: UInt64=0
     var lastEvents=[String]()
     /// "Preparing graphics" for the launching screen's details; starts over with each launch.
@@ -109,6 +112,7 @@ final class AppModel {
     var onboarded: Bool { state["onboarding_complete"] as? Bool == true }
     var launchStarted=Date()
     private var stopLaunchWait=false
+    private var steamReadyConfirmed=false
     /// Set by the launching screen's Cancel: also close the Steam this launch opened.
     private var closeOnStop=false
     var isPreview=false
@@ -232,6 +236,11 @@ final class AppModel {
     }
     func startup() {
         guard !started else { return };started=true
+        recipeCount = countRecipes(root: root)
+        recipeCountTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.recipeCount = countRecipes(root: self.root) }
+        }
         // Preview states exercise UI only and never create a user environment.
         if release?.distribution == "private-preview",let i=CommandLine.arguments.firstIndex(of:"--preview-state"),CommandLine.arguments.indices.contains(i+1),let preview=Screen(rawValue:CommandLine.arguments[i+1]) {
             isPreview=true;previewScreen(preview);return
@@ -609,7 +618,7 @@ final class AppModel {
         // Once, before Steam opens: in-game voice chat uses this app's permission.
         if Microphone.undecided { stage="Asking to use your microphone for voice chat";await Microphone.ask() }
         stage="Checking your running session";graphics=GraphicsProgress()
-        launchStarted=Date();stopLaunchWait=false;closeOnStop=false;canCancel=true
+        launchStarted=Date();stopLaunchWait=false;steamReadyConfirmed=false;closeOnStop=false;canCancel=true
         // Cancelling here ends the worker, and with it the graphics preparation, before
         // Steam opens (the preparation keeps its finished work; the next launch resumes).
         let launchEvents:[[String:Any]]
@@ -641,7 +650,7 @@ final class AppModel {
         stage="Waiting for the \(game?.title ?? "Steam") window";canCancel=true
         let result: LaunchReadiness.Result
         do {
-            result=try await LaunchReadiness.wait(launchEvents:launchEvents,stopped:{ self.stopLaunchWait },session:{
+            result=try await LaunchReadiness.wait(launchEvents:launchEvents,stopped:{ self.stopLaunchWait },confirmed:{ self.steamReadyConfirmed },session:{
                 let events=try await self.service.run("session")
                 return events.last?["processes"] as? [[String:Any]] ?? []
             })
@@ -786,6 +795,7 @@ final class AppModel {
     }
     /// The launching screen's Cancel.
     func cancelLaunch() { guard canCancel && screen == .launching else { return };closeOnStop=true;cancel() }
+    func confirmSteam() { guard canCancel && screen == .launching else { return };steamReadyConfirmed=true }
     func cancel() { guard canCancel else { return };if screen == .launching { stopLaunchWait=true;canCancel=false;service.cancel();return };paused=true;canCancel=false;stage="Pausing safely";service.cancel() }
     /// Settings saves a resolution as soon as it is chosen. The worker records it and
     /// writes it into the game's settings, where a choice made in the game's Video

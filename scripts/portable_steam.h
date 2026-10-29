@@ -20,7 +20,7 @@
 
 typedef struct { NSString *key, *name, *exe, *appID, *folder, *options; } MVGame;
 static const MVGame mvGames[]={
-    {@"cs2",@"Counter-Strike 2",@"cs2.exe",@"730",@"Counter-Strike Global Offensive/game/bin/win64",@"-dx11"},
+    {@"cs2",@"Counter-Strike 2",@"cs2.exe",@"730",@"Counter-Strike Global Offensive/game/bin/win64",@"-dx11 +exec autoexec"},
     // -dx11: DXMT translates Direct3D 11 only, and Deadlock may otherwise pick Vulkan.
     // -novid: skips Deadlock's intro video (CS2 has none).
     {@"deadlock",@"Deadlock",@"deadlock.exe",@"1422450",@"Deadlock/game/bin/win64",@"-dx11 -novid"},

@@ -57,6 +57,7 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,variant='dxmt
     build_setup(helpers/'ow2-setup',ROOT/'runtime/toolchains/libarchive-3.7.7',defines=('MACVOLVO_GPTK4',) if evaluation else ())
     shutil.move(helpers/'ow2-setup.build.json',output.parent/'worker-build.json')
     run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,'-parse-as-library',*(['-D','MACVOLVO_GPTK4'] if evaluation else []),*sorted((ROOT/'app/Sources').glob('*.swift')),'-o',macos/app_name)
+    run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,ROOT/'scripts/portable_pipeline.swift','-o',helpers/'pipeline-setup')
     # Steam's window on Wine 11 (portable_steam.h): the worker puts this in steamwebhelper.exe's place.
     run(MINGW_CLANG,'-O2','-municode','-mwindows','-ffile-prefix-map='+str(ROOT)+'=/ow2-source',ROOT/'scripts/webhelper_wrapper.c','-o',resources/'steamwebhelper.exe')
     rosetta=helpers/'Rosetta Check.app/Contents';(rosetta/'MacOS').mkdir(parents=True)
@@ -86,7 +87,7 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,variant='dxmt
     (output/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':bundle_id,'CFBundleExecutable':app_name,'CFBundleName':app_name,'CFBundleDisplayName':app_name,'CFBundlePackageType':'APPL','CFBundleShortVersionString':release['appVersion'],'CFBundleVersion':APP_BUILD,'CFBundleIconFile':'AppIcon','LSMinimumSystemVersion':MINIMUM_MACOS,'NSHighResolutionCapable':True,'LSMultipleInstancesProhibited':True,'NSPrincipalClass':'NSApplication','NSMicrophoneUsageDescription':MICROPHONE_USAGE,'NSHumanReadableCopyright':'Independent community project based on Recall. Not affiliated with or endorsed by Valve, Volvo or Apple.'}))
     if identity:
         timestamp=['--timestamp'] if identity!='-' else []
-        for binary in (helpers/'ow2-setup',rosetta.parent):
+        for binary in (helpers/'ow2-setup',helpers/'pipeline-setup',rosetta.parent):
             run('/usr/bin/codesign','--force','--options','runtime',*timestamp,'--sign',identity,binary)
         with tempfile.TemporaryDirectory() as folder:
             entitlements=Path(folder)/'app.entitlements';entitlements.write_bytes(plistlib.dumps(ENTITLEMENTS))

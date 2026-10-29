@@ -20,6 +20,9 @@ import Darwin
         // after a privacy change) arrive as this event. AppKit drops it while a sheet is open,
         // so AppModel.quit handles it: it closes the sheet first.
         NSAppleEventManager.shared().setEventHandler(self,andSelector:#selector(quitEvent(_:withReplyEvent:)),forEventClass:AEEventClass(kCoreEventClass),andEventID:AEEventID(kAEQuitApplication))
+        #if MACVOLVO_GPTK4
+        if UserDefaults.standard.object(forKey:"metalHUD") == nil { UserDefaults.standard.set(true,forKey:"metalHUD") }
+        #endif
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:600,height:800),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title=Brand.name;window.isReleasedWhenClosed=false
         window.titlebarAppearsTransparent=true;window.minSize=NSSize(width:540,height:620)

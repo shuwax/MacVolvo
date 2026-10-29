@@ -100,7 +100,7 @@ func inventory(_ directory: URL) throws -> [String: String] {
 // macOS reassigns that ID at each restart, so each restart began a new, empty
 // folder. Before each session, earlier folders are folded into the one the
 // game will open now, and removed.
-let namespaceBuild = "ow2-source-v1"
+let namespaceBuild = "cs2-v1"
 let mergeLimit = 256 * 1048576 // Leaves the game's 512 MB budget room for archives and new learning.
 func validKey(_ key: String) -> Bool { key.count == 64 && key.allSatisfy { "0123456789abcdef".contains($0) } }
 func identity(_ device: MTLDevice) -> (UInt64) -> [UInt8] {
@@ -248,6 +248,43 @@ func warm(_ folder: URL, _ costs: [String: Double]) throws -> Int {
 }
 func prepare() throws {
     let original = try consolidate()
+    // Import community seed cache every session (the seed folder is never deleted).
+    // Placed at cache/pipelines/seed/, it is invisible to learnedFolders() whose names
+    // are 64-hex GPU-identity hashes; the seed survives consolidation and re-seeds
+    // each time the game opens on a GPU whose current folder lacks the recipe.
+    let seedFolder = cache.appendingPathComponent("seed")
+    if fm.fileExists(atPath: seedFolder.appendingPathComponent("recipes").path) {
+        let seedRecipes = seedFolder.appendingPathComponent("recipes")
+        let seedLibraries = seedFolder.appendingPathComponent("libraries")
+        let targetRecipes = original.appendingPathComponent("recipes")
+        let targetLibraries = original.appendingPathComponent("libraries")
+        try fm.createDirectory(at: targetRecipes, withIntermediateDirectories: true)
+        try fm.createDirectory(at: targetLibraries, withIntermediateDirectories: true)
+        var usedBytes = folderBytes(original)
+        var seedEntries: [(key: String, cost: Double, libraries: [String])] = []
+        for file in (try? fm.contentsOfDirectory(at: seedRecipes, includingPropertiesForKeys: nil).prefix(32768)) ?? [] {
+            let key = file.deletingPathExtension().lastPathComponent
+            guard file.pathExtension == "json", validKey(key),
+                  !fm.fileExists(atPath: targetRecipes.appendingPathComponent(file.lastPathComponent).path),
+                  let data = try? json(file), let cost = data["cost_us"] as? Double,
+                  cost.isFinite, cost >= 0, let recipe = data["recipe"] as? [String: Any] else { continue }
+            let needed = ["vertex","fragment"].compactMap { (recipe[$0] as? [String: Any])?["library"] as? String }
+            guard recipe["vertex"] != nil, needed.allSatisfy(validKey) else { continue }
+            seedEntries.append((key, cost, needed))
+        }
+        var seedAdded = 0
+        for entry in seedEntries.sorted(by: { $0.cost > $1.cost }) {
+            let missing = Set(entry.libraries.map { $0 + ".air" }).filter { !fm.fileExists(atPath: targetLibraries.appendingPathComponent($0).path) }
+            let sizes = ([("recipes", entry.key + ".json")] + missing.map { ("libraries", $0) }).map { fileBytes(seedFolder.appendingPathComponent($0.0).appendingPathComponent($0.1)) }
+            guard sizes.allSatisfy({ $0 != nil }) else { continue }
+            let bytes = sizes.reduce(0) { $0 + $1! }
+            guard usedBytes + bytes <= mergeLimit else { continue }
+            for name in missing { try? fm.copyItem(at: seedLibraries.appendingPathComponent(name), to: targetLibraries.appendingPathComponent(name)) }
+            try? fm.copyItem(at: seedRecipes.appendingPathComponent(entry.key + ".json"), to: targetRecipes.appendingPathComponent(entry.key + ".json"))
+            usedBytes += bytes; seedAdded += 1
+        }
+        if seedAdded > 0 { print("Seeded \(seedAdded) community pipelines") }
+    }
     guard fm.fileExists(atPath: original.appendingPathComponent("recipes").path) else {
         print("No learned pipelines yet"); progress("done", ["learned": 0, "ready": 0, "added": 0]); return
     }

@@ -32,6 +32,7 @@ struct SetupView: View {
                         FooterTile(title:"Settings",symbol:"gearshape") { model.sheet = .settings }.disabled(model.screen == .moveApp)
                         FooterTile(title:"Help & FAQ",symbol:"questionmark.circle") { model.makeReport();model.sheet = .help }
                         FooterTile(title:"About",symbol:"info.circle") { model.sheet = .about }
+                        FooterTile(title:"Shaders",symbol:"sparkles") { model.sheet = .demoTraining }
                     }.frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,24)
                 }.padding(.horizontal,36).frame(maxWidth:.infinity).frame(minHeight:geometry.size.height)
             }.scrollIndicators(.hidden)
@@ -48,6 +49,7 @@ struct SetupView: View {
             case .update: UpdateSheet(model:model).interactiveDismissDisabled(model.update == .installing)
                 .onDisappear { model.updateSheetClosed() }
             case .whatsNew: WhatsNewSheet()
+            case .demoTraining: DemoTrainingSheet(model: model)
             }
         }
         .task { model.startup() }
@@ -143,9 +145,10 @@ struct SetupView: View {
         case .ready, .running:
             VStack(spacing:16) {
                 GamePicker(model:model)
+                ShaderStatus(model:model)
                 if model.lowStorage { storageWarning }
                 PerformanceTip()
-                if !model.firstMatchTipDismissed { FirstMatchTip { model.firstMatchTipDismissed=true } }
+                if model.recipeCount < 500 && !model.firstMatchTipDismissed { FirstMatchTip { model.firstMatchTipDismissed=true } }
             }
         case .driveMissing: EmptyView()
         }
@@ -215,6 +218,9 @@ struct SetupView: View {
         case .preparing:
             if model.canCancel { Button("Pause Setup",action:model.cancel).buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.large).keyboardShortcut(.cancelAction) }
         case .launching:
+            if model.canCancel && model.stage.contains("Waiting") {
+                LauncherPrimaryAction(title:"Steam is Ready",action:model.confirmSteam).keyboardShortcut(.defaultAction)
+            }
             LauncherCancelAction(title:"Cancel",action:model.cancelLaunch).keyboardShortcut(.cancelAction).disabled(!model.canCancel)
         case .installer:
             LauncherPrimaryAction(title:"Continue",action:model.finishInstaller).keyboardShortcut(.defaultAction).disabled(model.busy)
@@ -256,6 +262,12 @@ struct VersionStatus: View {
     var body:some View {
         HStack(spacing:6) {
             Text("Version \(UpdateCheck.installed)")
+            if model.recipeCount > 0 {
+                Text("·")
+                Button { model.sheet = .demoTraining } label: {
+                    Label { Text("\(model.recipeCount) shaders") } icon: { Image(systemName:"sparkles") }
+                }.buttonStyle(.borderless)
+            }
             if !Brand.allowsUpdates { Text("·");Text("GPTK4 evaluation") }
             switch model.update {
             case .available(let item):
@@ -378,5 +390,30 @@ private struct FooterTileBody: View {
             .contentShape(RoundedRectangle(cornerRadius:10,style:.continuous))
             .opacity(configuration.isPressed ? 0.7 : 1)
             .onHover { hovering=$0 }
+    }
+}
+
+// Shader recipe count badge shown in the game details area.
+private struct ShaderStatus: View {
+    @Bindable var model: AppModel
+    var body: some View {
+        LauncherPanel {
+            HStack {
+                Image(systemName: "sparkles")
+                    .font(LauncherStyle.font(13))
+                    .foregroundStyle(LauncherStyle.accent)
+                Text("Shader recipes")
+                    .font(LauncherStyle.font(13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(model.recipeCount)")
+                    .font(LauncherStyle.font(13, .semibold))
+                    .monospacedDigit()
+                Button("Build more") { model.sheet = .demoTraining }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.mini)
+            }
+        }
     }
 }
