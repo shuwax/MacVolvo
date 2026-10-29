@@ -790,6 +790,18 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
             if(apply && sessionProcesses().count)fail(@"close_game_before_maintenance");
             NSString *amount=nil;configureMetalFX(runtime(),[options[@"enabled"] isEqual:@"1"],options[@"sharpening"] ?: @"off",apply,&amount);
         }
+        else if([command isEqual:@"download-seed"]) {
+            // Always re-downloads and overwrites the seed so manual refresh picks up a newer version.
+            NSString *seedDir=join(join(root,@"cache/pipelines"),@"seed");
+            [fm removeItemAtPath:seedDir error:nil];
+            [fm createDirectoryAtPath:join(root,@"cache/pipelines") withIntermediateDirectories:YES attributes:nil error:nil];
+            event(@"downloading_seed_cache",nil);
+            NSString *seedArchive=download(
+                @"https://github.com/shuwax/MacVolvo/releases/download/seed-cache-v1/seed-cache.tar.gz",
+                @"729d41abd91a166320667df95923e5201910276e4d90964da20317193cd6b159");
+            extract(seedArchive,join(root,@"cache/pipelines"));
+            event(@"seed_cache_ready",nil);
+        }
         else if([command isEqual:@"close-client"]) {closeClient(@"close_game_before_update");event(@"client_closed",nil);}
         else if([command isEqual:@"parity-report"])event(@"parity_report",parityReport(runtime(),wineEnv(runtime())));
         else if([command isEqual:@"uninstall"])uninstall();

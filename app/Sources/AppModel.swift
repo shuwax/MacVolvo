@@ -182,7 +182,7 @@ final class AppModel {
         if name == "graphics" { graphics.update(value);return }
         if name == "pipeline_preparation_skipped" { graphics.skipped() }
         // Allowlisted stage names only; never retain arbitrary error detail/paths.
-        let labels=["downloading":"Downloading Steam", "download_verified":"Download verified", "installing_runtime":"Installing game components", "runtime_ready":"Game components ready", "preparing_environment":"Preparing your game environment", "environment_ready":"Game environment ready", "installing_battlenet":"Installing Steam", "steam_installed":"Steam installed", "preparing_pipelines":"Preparing graphics", "battlenet_started":"Opening Steam", "pipeline_preparation_skipped":"Opening Steam", "closing_client":"Closing Steam", "displays_changed":"Reopening Steam for your displays"]
+        let labels=["downloading":"Downloading Steam", "download_verified":"Download verified", "installing_runtime":"Installing game components", "runtime_ready":"Game components ready", "preparing_environment":"Preparing your game environment", "environment_ready":"Game environment ready", "installing_battlenet":"Installing Steam", "steam_installed":"Steam installed", "preparing_pipelines":"Preparing graphics", "battlenet_started":"Opening Steam", "pipeline_preparation_skipped":"Opening Steam", "closing_client":"Closing Steam", "displays_changed":"Reopening Steam for your displays", "downloading_seed_cache":"Downloading shader cache", "seed_cache_ready":"Shader cache ready"]
         if let label=labels[name] { stage=label; lastEvents.append(name); lastEvents=Array(lastEvents.suffix(12)) }
     }
     func refresh() async throws {
@@ -796,6 +796,23 @@ final class AppModel {
     /// The launching screen's Cancel.
     func cancelLaunch() { guard canCancel && screen == .launching else { return };closeOnStop=true;cancel() }
     func confirmSteam() { guard canCancel && screen == .launching else { return };steamReadyConfirmed=true }
+
+    enum SeedDownloadState: Equatable { case idle, downloading, done, failed(String) }
+    var seedDownload: SeedDownloadState = .idle
+
+    func downloadSeedCache() {
+        guard seedDownload != .downloading else { return }
+        seedDownload = .downloading
+        Task {
+            do {
+                _ = try await service.run("download-seed", event: receive)
+                recipeCount = countRecipes(root: root)
+                seedDownload = .done
+            } catch {
+                seedDownload = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+        }
+    }
     func cancel() { guard canCancel else { return };if screen == .launching { stopLaunchWait=true;canCancel=false;service.cancel();return };paused=true;canCancel=false;stage="Pausing safely";service.cancel() }
     /// Settings saves a resolution as soon as it is chosen. The worker records it and
     /// writes it into the game's settings, where a choice made in the game's Video

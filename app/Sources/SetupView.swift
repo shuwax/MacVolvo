@@ -398,7 +398,7 @@ private struct ShaderStatus: View {
     @Bindable var model: AppModel
     var body: some View {
         LauncherPanel {
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .font(LauncherStyle.font(13))
                     .foregroundStyle(LauncherStyle.accent)
@@ -409,11 +409,39 @@ private struct ShaderStatus: View {
                 Text("\(model.recipeCount)")
                     .font(LauncherStyle.font(13, .semibold))
                     .monospacedDigit()
+                SeedDownloadButton(model: model)
                 Button("Build more") { model.sheet = .demoTraining }
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
                     .controlSize(.mini)
             }
+        }
+    }
+}
+
+private struct SeedDownloadButton: View {
+    @Bindable var model: AppModel
+    var body: some View {
+        switch model.seedDownload {
+        case .downloading:
+            ProgressView().controlSize(.mini).frame(width: 28)
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(LauncherStyle.font(13))
+        case .failed:
+            Button { model.downloadSeedCache() } label: {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.borderless)
+            .help("Download failed — tap to retry")
+        case .idle:
+            Button("↓ Cache") { model.downloadSeedCache() }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.mini)
+                .help("Download community shader cache (~16 MB)")
         }
     }
 }
