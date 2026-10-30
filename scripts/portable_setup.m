@@ -474,11 +474,21 @@ static void installClient(NSString *installer, NSString *expected) {
     event(@"steam_installed",nil);
 }
 static void closeClient(NSString *gameRunning);
+// Kills any wine/wineserver processes that outlived their session (orphans after
+// a game crash, Steam crash, or wineserver death not tracked by wineserver -k).
+static void killOrphanWine(void) {
+    NSTask *p=[NSTask new];
+    p.executableURL=[NSURL fileURLWithPath:@"/usr/bin/pkill"];
+    p.arguments=@[@"-9",@"-f",@"wine"];
+    [p launchAndReturnError:nil];
+    [p waitUntilExit];
+}
 // Ends whatever is left of the Wine session (the update Agent, Wine's own services).
 static void endSession(NSString *engine) {
     int code=waitTask(task(join(engine,@"bin/wineserver"),@[@"-k"],wineEnv(engine),@"session-end.log"),15);
     if(code!=0 && code!=1)fail(@"client_close_failed");
     if(waitTask(task(join(engine,@"bin/wineserver"),@[@"-w"],wineEnv(engine),@"session-end-wait.log"),15))fail(@"client_close_failed");
+    killOrphanWine();
 }
 /* Apple's Metal Performance HUD (Settings, launch --metal-hud 1) reaches the game through
  * Steam, which starts it with its own environment. MTL_HUD_ELEMENTS lists the HUD's default
