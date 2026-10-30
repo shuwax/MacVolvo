@@ -30,9 +30,13 @@ final class DemoTrainingModel {
         let cfgDir = root
             .appendingPathComponent("environment/drive_c/Program Files (x86)/Steam/steamapps/common/Counter-Strike Global Offensive/game/csgo/cfg")
         let demoCfg = cfgDir.appendingPathComponent("macvolvo_demo.cfg")
-        // Ensure autoexec.cfg execs macvolvo_demo.cfg (CS2 silently ignores exec for missing files)
+        // Create the cfg directory if CS2 hasn't been launched yet.
+        try? FileManager.default.createDirectory(at: cfgDir, withIntermediateDirectories: true)
+        // Ensure autoexec.cfg execs macvolvo_demo.cfg (CS2 silently ignores exec for missing files).
+        // Create autoexec.cfg if it doesn't exist yet.
         let autoexec = cfgDir.appendingPathComponent("autoexec.cfg")
-        if let existing = try? String(contentsOf: autoexec, encoding: .utf8), !existing.contains("exec macvolvo_demo") {
+        let existing = (try? String(contentsOf: autoexec, encoding: .utf8)) ?? ""
+        if !existing.contains("exec macvolvo_demo") {
             try? (existing + "\nexec macvolvo_demo\n").write(to: autoexec, atomically: true, encoding: .utf8)
         }
 
