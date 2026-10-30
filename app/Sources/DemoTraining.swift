@@ -112,7 +112,12 @@ final class DemoTrainingModel {
         }
     }
 
-    func stop() { stopRequested = true; trainTask?.cancel() }
+    func stop(helper: URL, root: URL) {
+        stopRequested = true
+        trainTask?.cancel()
+        // Shut down Steam cleanly now that training is done.
+        Task.detached { runProcess(helper.path, ["close-client", "--root", root.path]) }
+    }
 
     private func appendLog(_ line: String) {
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
@@ -121,13 +126,23 @@ final class DemoTrainingModel {
     }
 
     private func closeCS2(helper: URL, root: URL) async {
+        // Kill only cs2.exe — keep Steam running so the next demo starts faster
+        // and the Wine session stays consistent. close-client would shut down all
+        // of Steam + endSession, leaving the prefix in an inconsistent state.
         await Task.detached {
-            runProcess(helper.path, ["close-client", "--root", root.path])
-            runProcess("/usr/bin/pkill", ["-f", "cs2.exe"])
+            runProcess("/usr/bin/pkill", ["-TERM", "-f", "cs2.exe"])
         }.value
-        for _ in 0..<15 {
+        for _ in 0..<20 {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if !(await cs2Running()) { break }
+            if !(await cs2Running()) { return }
+        }
+        // Graceful SIGTERM didn't work — force kill.
+        await Task.detached {
+            runProcess("/usr/bin/pkill", ["-9", "-f", "cs2.exe"])
+        }.value
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if !(await cs2Running()) { return }
         }
     }
 }
@@ -289,7 +304,7 @@ struct DemoTrainingSheet: View {
     private var actionButton: some View {
         Group {
             if training.state == .running {
-                Button("Stop") { training.stop() }
+                Button("Stop") { training.stop(helper: model.service.helper, root: model.root) }
                     .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.large)
             } else {
                 LauncherPrimaryAction(
