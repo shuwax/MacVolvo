@@ -611,8 +611,8 @@ static void launchClient(BOOL diagnostic, NSString *play, NSString *fullscreen, 
             @try {
                 [fm createDirectoryAtPath:join(root,@"cache/pipelines") withIntermediateDirectories:YES attributes:nil error:nil];
                 NSString *seedArchive=download(
-                    @"https://github.com/shuwax/MacVolvo/releases/download/seed-cache-v1/seed-cache.tar.gz",
-                    @"729d41abd91a166320667df95923e5201910276e4d90964da20317193cd6b159");
+                    @"https://github.com/shuwax/MacVolvo/releases/download/seed-cache-v2/seed-cache.tar.gz",
+                    @"42abf479ef47d41b99d58af71908d54e1825ca272fd54e4fe679165d1ba21d94");
                 extract(seedArchive,join(root,@"cache/pipelines"));
                 event(@"seed_cache_ready",nil);
             } @catch(NSException *e) {
@@ -806,8 +806,8 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
             [fm createDirectoryAtPath:join(root,@"cache/pipelines") withIntermediateDirectories:YES attributes:nil error:nil];
             event(@"downloading_seed_cache",nil);
             NSString *seedArchive=download(
-                @"https://github.com/shuwax/MacVolvo/releases/download/seed-cache-v1/seed-cache.tar.gz",
-                @"729d41abd91a166320667df95923e5201910276e4d90964da20317193cd6b159");
+                @"https://github.com/shuwax/MacVolvo/releases/download/seed-cache-v2/seed-cache.tar.gz",
+                @"42abf479ef47d41b99d58af71908d54e1825ca272fd54e4fe679165d1ba21d94");
             extract(seedArchive,join(root,@"cache/pipelines"));
             event(@"seed_cache_ready",nil);
         }
