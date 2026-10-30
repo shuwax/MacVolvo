@@ -488,7 +488,6 @@ static void endSession(NSString *engine) {
     int code=waitTask(task(join(engine,@"bin/wineserver"),@[@"-k"],wineEnv(engine),@"session-end.log"),15);
     if(code!=0 && code!=1)fail(@"client_close_failed");
     if(waitTask(task(join(engine,@"bin/wineserver"),@[@"-w"],wineEnv(engine),@"session-end-wait.log"),15))fail(@"client_close_failed");
-    killOrphanWine();
 }
 /* Apple's Metal Performance HUD (Settings, launch --metal-hud 1) reaches the game through
  * Steam, which starts it with its own environment. MTL_HUD_ELEMENTS lists the HUD's default
@@ -812,11 +811,11 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
             extract(seedArchive,join(root,@"cache/pipelines"));
             event(@"seed_cache_ready",nil);
         }
-        else if([command isEqual:@"close-client"]) {closeClient(@"close_game_before_update");event(@"client_closed",nil);}
+        else if([command isEqual:@"close-client"]) {closeClient(@"close_game_before_update");killOrphanWine();event(@"client_closed",nil);}
         else if([command isEqual:@"parity-report"])event(@"parity_report",parityReport(runtime(),wineEnv(runtime())));
         else if([command isEqual:@"uninstall"])uninstall();
         else if([command isEqual:@"discard-unused"])discardUnused();
-        else if([command isEqual:@"stop"]) {endSession(runtime());event(@"environment_stopped",nil);}
+        else if([command isEqual:@"stop"]) {endSession(runtime());killOrphanWine();event(@"environment_stopped",nil);}
         else fail(@"unknown_command");
         if(lockFD>=0)close(lockFD);return 0;
     } @catch(NSException *exception) {
